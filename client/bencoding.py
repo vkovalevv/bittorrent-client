@@ -75,7 +75,7 @@ class Encoder:
                 return lst
             case dict():
                 dct = b''
-                for key, value in val.items():
+                for key, value in sorted(val.items()):
                     key_encode = self.in_depth(key)
                     value_encode = self.in_depth(value)
                     dct += key_encode + value_encode

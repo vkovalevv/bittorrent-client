@@ -5,17 +5,31 @@ import secrets
 import socket
 import struct
 
-import urllib
 from urllib.parse import urlencode
 
-from bencode.bencoding import Decoder, Encoder
+from client.bencoding import Decoder, Encoder
+from client.peer import Handshake
 
 
-def decode_peer_list(peers: bytes):
-    for i in range(0, len(peers), 6):
-        ip = socket.inet_ntoa(peers[i:i+4])
-        port = struct.unpack('>H', peers[i+4:i+6])[0]
-        print(ip, port)
+async def send_handshake(info_hash, peer_id, ip, port):
+    try:
+        print(f'Send handshake to: {ip}:{port}')
+        handshake = Handshake(info_hash, peer_id)
+        reader, writer = await asyncio.open_connection(ip, port)
+        print(f'Open connection to: {ip}:{port}')
+        writer.write(handshake.serialize())
+        await writer.drain()
+
+        buf = b''
+        i = 0
+        while len(buf) != handshake.length and i != 10:
+            buf = await reader.readexactly(handshake.length)
+            i += 1
+        print(buf)
+        return buf
+    except Exception as e:
+        print(f"fail with {ip}:{port} [{e}]")
+    return
 
 
 def generate_peer_id():
@@ -36,16 +50,24 @@ def extract_data(file: str) -> tuple:
     return torrent_data
 
 
-async def get(url: str):
+async def get_peers(url: str):
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
         decode_data = Decoder(response.read()).decode()
-        decode_peer_list(decode_data[b'peers'])
+        peer_list = []
+        peers = decode_data[b'peers']
+        print(decode_data)
+        for i in range(0, len(peers), 6):
+            ip = socket.inet_ntoa(peers[i:i+4])
+            port = struct.unpack('>H', peers[i+4:i+6])[0]
+            peer_list.append((ip, port))
+    return peer_list
 
 
 async def main():
     data = extract_data(
-        '/Users/vkovalev/Desktop/yandex/bittorrent/bencode/test.torrent')
+        "/Users/vkovalev/Desktop/yandex/bittorrent/client/test2.torrent"
+    )
     info = data[b'info']
     info_hash = hashlib.sha1(Encoder(info).encode()).digest()
     peer_id = generate_peer_id()
@@ -55,10 +77,13 @@ async def main():
         'port': 6881,
         'uploaded': 0,
         'downloaded': 0,
-        'length': info[b'length'],
+        'left': info[b'length'],
         'compact': 1
     }
     url = data[b'announce'].decode() + '?' + urlencode(query_data)
-    await get(url)
-
+    peers = await get_peers(url)
+    tasks = [send_handshake(
+        info_hash=info_hash, peer_id=peer_id, ip=ip, port=port) for ip, port in peers]
+    result = await asyncio.gather(*tasks)
+    print(result)
 asyncio.run(main())
