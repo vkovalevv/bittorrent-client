@@ -19,7 +19,7 @@ class Handshake:
                                       self.info_hash,
                                       self.peer_id)
         return handshake_bytes
-
+    
     @property
     def length(self):
         return 49 + self.pstrlen
